@@ -1,5 +1,6 @@
 use crate::Error;
 
+use atoi;
 use bytes::{Buf, Bytes};
 use std::convert::TryInto;
 use std::fmt;
@@ -29,9 +30,7 @@ impl Frame {
     /// panics if `self` is not an array
     pub(crate) fn push_bulk(&mut self, bytes: Bytes) {
         match self {
-            Frame::Array(vec) => {
-                vec.push(Frame::Bulk(bytes));
-            }
+            Frame::Array(vec) => vec.push(Frame::Bulk(bytes)),
             _ => panic!("not an array frame"),
         }
     }
@@ -43,9 +42,7 @@ impl Frame {
     /// panics if `self` is not an array
     pub(crate) fn push_int(&mut self, value: u64) {
         match self {
-            Frame::Array(vec) => {
-                vec.push(Frame::Integer(value));
-            }
+            Frame::Array(vec) => vec.push(Frame::Integer(value)),
             _ => panic!("not an array frame"),
         }
     }
@@ -165,7 +162,7 @@ impl Frame {
     }
 
     /// Converts the frame to an "unexpected frame" error
-    pub(crate) fn to_error(&self) -> Error {
+    pub(crate) fn to_error(&self) -> crate::Error {
         format!("unexpected frame: {self}").into()
     }
 }
@@ -181,26 +178,26 @@ impl PartialEq<&str> for Frame {
 }
 
 impl fmt::Display for Frame {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use std::str;
 
         match self {
-            Frame::Simple(response) => response.fmt(fmt),
-            Frame::Error(msg) => write!(fmt, "error: {msg}"),
-            Frame::Integer(num) => num.fmt(fmt),
+            Frame::Simple(response) => response.fmt(f),
+            Frame::Error(msg) => write!(f, "error: {msg}"),
+            Frame::Integer(num) => num.fmt(f),
             Frame::Bulk(msg) => match str::from_utf8(msg) {
-                Ok(string) => string.fmt(fmt),
-                Err(_) => write!(fmt, "{msg:?}"),
+                Ok(string) => string.fmt(f),
+                Err(_) => write!(f, "{msg:?}"),
             },
-            Frame::Null => "(nil)".fmt(fmt),
+            Frame::Null => "(nil)".fmt(f),
             Frame::Array(parts) => {
                 for (i, part) in parts.iter().enumerate() {
                     if i > 0 {
                         // use space as the array element display separator
-                        write!(fmt, " ")?;
+                        write!(f, " ")?;
                     }
 
-                    part.fmt(fmt)?;
+                    part.fmt(f)?;
                 }
 
                 Ok(())
@@ -234,13 +231,10 @@ fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), Error> {
     Ok(())
 }
 
-/// Read a new-line terminated decimal
 fn get_decimal(src: &mut Cursor<&[u8]>) -> Result<u64, Error> {
-    use atoi::atoi;
-
     let line = get_line(src)?;
 
-    atoi::<u64>(line).ok_or_else(|| "protocol error; invalid frame format".into())
+    atoi::atoi::<u64>(line).ok_or_else(|| "protocol error; invalid frame format".into())
 }
 
 /// Find a line
