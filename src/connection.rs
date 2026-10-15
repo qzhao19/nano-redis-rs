@@ -1,11 +1,10 @@
 use crate::exception::Error;
-use crate::frame::{self, Frame};
+use crate::frame::Frame;
 
 use bytes::{Buf, BytesMut};
-use std::io::{self, Cursor};
+use std::io::Cursor;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
-// use tokio::time::error::Error;
 
 /// Send and receive `Frame` values from a remote peer.
 ///
@@ -82,6 +81,39 @@ impl Connection {
         }
     }
 
+    /// Write a single `Frame` value to the underlying stream.
+    ///
+    /// The `Frame` value is written to the socket using the various `write_*`
+    /// functions provided by `AsyncWrite`. Calling these functions directly on
+    /// a `TcpStream` is **not** advised, as this will result in a large number of
+    /// syscalls. However, it is fine to call these functions on a *buffered*
+    /// write stream. The data will be written to the buffer. Once the buffer is
+    /// full, it is flushed to the underlying socket.
+    pub async fn write_frame(&mut self, frame: &Frame) -> Result<(), Error> {
+        // Arrays are encoded by encoding each entry. All other frame types are
+        // considered literals. For now, mini-redis is not able to encode
+        // recursive frame structures. See below for more details.
+        match frame {
+            Frame::Array(value) => {
+                // Encode the frame type prefix. For an array, it is `*`.
+                self.stream.write_u8(b'*').await?;
+
+                // Encode the length of the array.
+                self.write_decimal(value.len() as u64).await?;
+
+                // Iterate and encode each entry in the array.
+                for entry in &**value {
+                    self.write_value(entry).await?;
+                }
+            }
+            // The frame type is a literal. Encode the value directly.
+            _ => self.write_value(frame).await?,
+        }
+        self.stream.flush().await?;
+
+        Ok(())
+    }
+
     /// Tries to parse a frame from the buffer. If the buffer contains enough
     /// data, the frame is returned and the data removed from the buffer. If not
     /// enough data has been buffered yet, `Ok(None)` is returned. If the
@@ -142,7 +174,60 @@ impl Connection {
             // An error was encountered while parsing the frame. The connection
             // is now in an invalid state. Returning `Err` from here will result
             // in the connection being closed.
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e),
         }
+    }
+
+    /// Write a frame literal to the stream
+    async fn write_value(&mut self, frame: &Frame) -> Result<(), Error> {
+        match frame {
+            Frame::Simple(value) => {
+                self.stream.write_u8(b'+').await?;
+                self.stream.write_all(value.as_bytes()).await?;
+                self.stream.write_all(b"\r\n").await?;
+            }
+            Frame::Error(value) => {
+                self.stream.write_u8(b'-').await?;
+                self.stream.write_all(value.as_bytes()).await?;
+                self.stream.write_all(b"\r\n").await?;
+            }
+            Frame::Integer(value) => {
+                self.stream.write_u8(b':').await?;
+                self.write_decimal(*value).await?;
+            }
+            Frame::Null => {
+                self.stream.write_all(b"$-1\r\n").await?;
+            }
+            Frame::Bulk(val) => {
+                let len = val.len();
+
+                self.stream.write_u8(b'$').await?;
+                self.write_decimal(len as u64).await?;
+                self.stream.write_all(val).await?;
+                self.stream.write_all(b"\r\n").await?;
+            }
+            // Encoding an `Array` from within a value cannot be done using a
+            // recursive strategy. In general, async fns do not support
+            // recursion. Mini-redis has not needed to encode nested arrays yet,
+            // so for now it is skipped.
+            Frame::Array(_val) => unreachable!(),
+        }
+
+        Ok(())
+    }
+
+    /// Write a decimal frame to the stream
+    async fn write_decimal(&mut self, value: u64) -> Result<(), Error> {
+        // Convert the value to a string
+        let mut buf = [0u8; 20];
+        let mut buf = Cursor::new(&mut buf[..]);
+        std::io::Write::write_fmt(&mut buf, format_args!("{value}"))?;
+
+        let pos = buf.position() as usize;
+
+        self.stream.write_all(&buf.get_ref()[..pos]).await?;
+        self.stream.write_all(b"\r\n").await?;
+
+        Ok(())
     }
 }
