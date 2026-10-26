@@ -57,4 +57,23 @@ impl Parse {
             .into()),
         }
     }
+
+    /// Return the next entry as raw bytes.
+    ///
+    /// If the next entry cannot be represented as raw bytes, an error is
+    /// returned.
+    pub(crate) fn next_bytes(&mut self) -> Result<Bytes, ParseError> {
+        match self.next()? {
+            // Both `Simple` and `Bulk` representation may be raw bytes.
+            //
+            // Although errors are stored as strings and could be represented as
+            // raw bytes, they are considered separate types.
+            Frame::Simple(s) => Ok(Bytes::from(s.into_bytes())),
+            Frame::Bulk(data) => Ok(data),
+            frame => Err(format!(
+                "protocol error; expected simple frame or bulk frame, got {frame:?}"
+            )
+            .into()),
+        }
+    }
 }
