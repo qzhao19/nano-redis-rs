@@ -95,3 +95,24 @@ pub(crate) struct Db {
     /// `Arc<Shared>`.
     shared: Arc<Shared>,
 }
+
+impl Db {
+    /// Create a new, empty, `Db` instance. Allocates shared state and spawns a
+    /// background task to manage key expiration.
+    pub(crate) fn new() -> Db {
+        let shared = Arc::new(Shared {
+            state: Mutex::new(State {
+                entries: HashMap::new(),
+                pub_sub: HashMap::new(),
+                expirations: BTreeSet::new(),
+                shutdown: false,
+            }),
+            background_task: Notify::new(),
+        });
+
+        // Start the background task.
+        tokio::spawn(purge_expired_tasks(shared.clone()));
+
+        Db { shared }
+    }
+}
