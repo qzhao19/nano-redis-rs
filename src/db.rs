@@ -115,53 +115,12 @@ impl Db {
 
         Db { shared }
     }
-}
 
-impl Shared {
-    /// Purge all expired keys and return the `Instant` at which the **next**
-    /// key will expire. The background task will sleep until this instant.
-    fn purge_expired_keys(&self) -> Option<Instant> {
-        let mut state = self.state.lock().unwrap();
-
-        if state.shutdown {
-            // The database is shutting down. All handles to the shared state
-            // have dropped. The background task should exit.
-            return None;
-        }
-
-        // This is needed to make the borrow checker happy. In short, `lock()`
-        // returns a `MutexGuard` and not a `&mut State`. The borrow checker is
-        // not able to see "through" the mutex guard and determine that it is
-        // safe to access both `state.expirations` and `state.entries` mutably,
-        // so we get a "real" mutable reference to `State` outside of the loop.
-        let state = &mut *state;
-
-        // Find all keys scheduled to expire **before** now.
-        let now = Instant::now();
-
-        while let Some(&(when, ref key)) = state.expirations.iter().next() {
-            if when > now {
-                // Done purging, `when` is the instant at which the next key
-                // expires. The worker task will wait until this instant.
-                return Some(when);
-            }
-
-            // The key expired, remove it
-            state.entries.remove(key);
-            state.expirations.remove(&(when, key.clone()));
-        }
-
-        None
-    }
-
-    /// Returns `true` if the database is shutting down
+    /// Get the value associated with a key.
     ///
-    /// The `shutdown` flag is set when all `Db` values have dropped, indicating
-    /// that the shared state can no longer be accessed.
-    fn is_shutdown(&self) -> bool {
-        self.state.lock().unwrap().shutdown
-    }
-
+    /// Returns `None` if there is no value associated with the key. This may be
+    /// due to never having assigned a value to the key or a previously assigned
+    /// value expired.
     pub(crate) fn get(&self, key: &str) -> Option<Bytes> {
         // Acquire the lock, get the entry and clone the value.
         //
@@ -236,6 +195,117 @@ impl Shared {
             // its state to reflect a new expiration.
             self.shared.background_task.notify_one();
         }
+    }
+
+    /// Returns a `Receiver` for the requested channel.
+    ///
+    /// The returned `Receiver` is used to receive values broadcast by `PUBLISH`
+    /// commands.
+    pub(crate) fn subscribe(&self, key: String) -> broadcast::Receiver<Bytes> {
+        use std::collections::hash_map::Entry;
+
+        // Acquire the mutex
+        let mut state = self.shared.state.lock().unwrap();
+
+        // If there is no entry for the requested channel, then create a new
+        // broadcast channel and associate it with the key. If one already
+        // exists, return an associated receiver.
+        match state.pub_sub.entry(key) {
+            Entry::Occupied(e) => e.get().subscribe(),
+            Entry::Vacant(e) => {
+                // No broadcast channel exists yet, so create one.
+                //
+                // The channel is created with a capacity of `1024` messages. A
+                // message is stored in the channel until **all** subscribers
+                // have seen it. This means that a slow subscriber could result
+                // in messages being held indefinitely.
+                //
+                // When the channel's capacity fills up, publishing will result
+                // in old messages being dropped. This prevents slow consumers
+                // from blocking the entire system.
+                let (tx, rx) = broadcast::channel(1024);
+                e.insert(tx);
+                rx
+            }
+        }
+    }
+
+    /// Publish a message to the channel. Returns the number of subscribers
+    /// listening on the channel.
+    pub(crate) fn publish(&self, key: &str, value: Bytes) -> usize {
+        let state = self.shared.state.lock().unwrap();
+
+        state
+            .pub_sub
+            .get(key)
+            // On a successful message send on the broadcast channel, the number
+            // of subscribers is returned. An error indicates there are no
+            // receivers, in which case, `0` should be returned.
+            .map(|tx| tx.send(value).unwrap_or(0))
+            // If there is no entry for the channel key, then there are no
+            // subscribers. In this case, return `0`.
+            .unwrap_or(0)
+    }
+
+    /// Signals the purge background task to shut down. This is called by the
+    /// `DbShutdown`s `Drop` implementation.
+    fn shutdown_purge_task(&self) {
+        // The background task must be signaled to shut down. This is done by
+        // setting `State::shutdown` to `true` and signalling the task.
+        let mut state = self.shared.state.lock().unwrap();
+        state.shutdown = true;
+
+        // Drop the lock before signalling the background task. This helps
+        // reduce lock contention by ensuring the background task doesn't
+        // wake up only to be unable to acquire the mutex.
+        drop(state);
+        self.shared.background_task.notify_one();
+    }
+}
+
+impl Shared {
+    /// Purge all expired keys and return the `Instant` at which the **next**
+    /// key will expire. The background task will sleep until this instant.
+    fn purge_expired_keys(&self) -> Option<Instant> {
+        let mut state = self.state.lock().unwrap();
+
+        if state.shutdown {
+            // The database is shutting down. All handles to the shared state
+            // have dropped. The background task should exit.
+            return None;
+        }
+
+        // This is needed to make the borrow checker happy. In short, `lock()`
+        // returns a `MutexGuard` and not a `&mut State`. The borrow checker is
+        // not able to see "through" the mutex guard and determine that it is
+        // safe to access both `state.expirations` and `state.entries` mutably,
+        // so we get a "real" mutable reference to `State` outside of the loop.
+        let state = &mut *state;
+
+        // Find all keys scheduled to expire **before** now.
+        let now = Instant::now();
+
+        while let Some(&(when, ref key)) = state.expirations.iter().next() {
+            if when > now {
+                // Done purging, `when` is the instant at which the next key
+                // expires. The worker task will wait until this instant.
+                return Some(when);
+            }
+
+            // The key expired, remove it
+            state.entries.remove(key);
+            state.expirations.remove(&(when, key.clone()));
+        }
+
+        None
+    }
+
+    /// Returns `true` if the database is shutting down
+    ///
+    /// The `shutdown` flag is set when all `Db` values have dropped, indicating
+    /// that the shared state can no longer be accessed.
+    fn is_shutdown(&self) -> bool {
+        self.state.lock().unwrap().shutdown
     }
 }
 
