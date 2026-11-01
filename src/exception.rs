@@ -5,8 +5,17 @@ use std::string::FromUtf8Error;
 
 #[derive(Debug)]
 pub enum Error {
-    /// Not enough data is available to parse a message
+    /// Not enough data is available to parse a frame from the socket. More
+    /// data may still arrive, so this is recoverable: the caller waits for
+    /// more bytes (see `Connection::parse_frame`, which maps this to
+    /// `Ok(None)`).
     Incomplete,
+
+    /// A command's array frame was fully consumed before all of the command's
+    /// fields were read. The frame itself was received in its entirety, so
+    /// waiting for more data cannot help: this is a malformed command and the
+    /// connection must be terminated.
+    EndOfStream,
 
     /// An error occurred on the underlying transport.
     Io(io::Error),
@@ -49,6 +58,7 @@ impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::Incomplete => "stream ended early".fmt(fmt),
+            Error::EndOfStream => "protocol error; unexpected end of stream".fmt(fmt),
             Error::Io(err) => err.fmt(fmt),
             Error::Other(msg) => msg.fmt(fmt),
         }
@@ -63,40 +73,3 @@ impl std::error::Error for Error {
         }
     }
 }
-
-/// Error encountered while parsing a frame.
-///
-/// Only `EndOfStream` errors are handled at runtime. All other errors result in
-/// the connection being terminated.
-#[derive(Debug)]
-pub(crate) enum ParseError {
-    /// Attempting to extract a value failed due to the frame being fully
-    /// consumed.
-    EndOfStream,
-
-    /// All other errors
-    Other(Error),
-}
-
-impl From<String> for ParseError {
-    fn from(src: String) -> ParseError {
-        ParseError::Other(src.into())
-    }
-}
-
-impl From<&str> for ParseError {
-    fn from(src: &str) -> ParseError {
-        src.to_string().into()
-    }
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ParseError::EndOfStream => "protocol error; unexpected end of stream".fmt(f),
-            ParseError::Other(err) => err.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for ParseError {}
