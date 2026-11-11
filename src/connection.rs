@@ -55,7 +55,7 @@ impl Connection {
     /// On success, the received frame is returned. If the `TcpStream`
     /// is closed in a way that doesn't break a frame in half, it returns
     /// `None`. Otherwise, an error is returned.
-    pub async fn read_parse(&mut self) -> Result<Option<Frame>, Error> {
+    pub async fn read_frame(&mut self) -> Result<Option<Frame>, Error> {
         loop {
             // Attempt to parse a frame from the buffered data. If enough data
             // has been buffered, the frame is returned.
@@ -148,7 +148,7 @@ impl Connection {
     }
 
     /// Write a frame literal to the stream
-    async fn write_value(&mut self, frame: &Frame) -> Result<(), Error> {
+    pub async fn write_frame(&mut self, frame: &Frame) -> Result<(), Error> {
         match frame {
             Frame::Simple(value) => {
                 self.stream.write_u8(b'+').await?;
