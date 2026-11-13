@@ -3,3 +3,6 @@ pub use get::Get;
 
 mod ping;
 pub use ping::Ping;
+
+mod publish;
+pub use publish::Publish;
