@@ -47,7 +47,7 @@ impl Publish {
     /// ```text
     /// PUBLISH channel message
     /// ```
-    pub(crate) fn parse_frame(parse: &mut Parse) -> Result<Publish, Error> {
+    pub(crate) fn parse_frames(parse: &mut Parse) -> Result<Publish, Error> {
         // The `PUBLISH` string has already been consumed. Extract the `channel`
         // and `message` values from the frame.
         //
