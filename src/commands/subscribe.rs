@@ -150,6 +150,19 @@ impl Subscribe {
             };
         }
     }
+
+    /// Converts the command into an equivalent `Frame`.
+    ///
+    /// This is called by the client when encoding a `Subscribe` command to send
+    /// to the server.
+    pub(crate) fn into_frame(self) -> Frame {
+        let mut frame = Frame::array();
+        frame.push_bulk(Bytes::from("subscribe".as_bytes()));
+        for channel in self.channels {
+            frame.push_bulk(Bytes::from(channel.into_bytes()));
+        }
+        frame
+    }
 }
 
 impl Unsubscribe {
