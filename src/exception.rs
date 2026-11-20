@@ -2,6 +2,7 @@ use std::fmt;
 use std::io;
 use std::num::TryFromIntError;
 use std::string::FromUtf8Error;
+use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
 pub enum Error {
@@ -51,6 +52,18 @@ impl From<TryFromIntError> for Error {
 impl From<io::Error> for Error {
     fn from(src: io::Error) -> Error {
         Error::Io(src)
+    }
+}
+
+impl<T> From<mpsc::error::SendError<T>> for Error {
+    fn from(_src: mpsc::error::SendError<T>) -> Error {
+        "channel closed".into()
+    }
+}
+
+impl From<oneshot::error::RecvError> for Error {
+    fn from(_src: oneshot::error::RecvError) -> Error {
+        "channel closed".into()
     }
 }
 
