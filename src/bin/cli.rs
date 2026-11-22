@@ -74,7 +74,7 @@ enum Command {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Error> {
     // Enable logging
-    tracing_subscriber::fmt::try_init()?;
+    tracing_subscriber::fmt::try_init().map_err(|err| err.to_string())?;
 
     // Parse command line arguments
     let cli = Cli::parse();
