@@ -77,6 +77,27 @@ pub(crate) struct DbDropGuard {
     db: Db,
 }
 
+impl DbDropGuard {
+    /// Create a new `DbDropGuard`, wrapping a `Db` instance. When this is dropped
+    /// the `Db`'s purge task will be shut down.
+    pub(crate) fn new() -> DbDropGuard {
+        DbDropGuard { db: Db::new() }
+    }
+
+    /// Get the shared database. Internally, this is an
+    /// `Arc`, so a clone only increments the ref count.
+    pub(crate) fn db(&self) -> Db {
+        self.db.clone()
+    }
+}
+
+impl Drop for DbDropGuard {
+    fn drop(&mut self) {
+        // Signal the 'Db' instance to shut down the task that purges expired keys
+        self.db.shutdown_purge_task();
+    }
+}
+
 /// Server state shared across all connections.
 ///
 /// `Db` contains a `HashMap` storing the key/value data and all
