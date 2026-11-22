@@ -14,6 +14,7 @@ use parse::Parse;
 
 mod db;
 use db::Db;
+use db::DbDropGuard;
 
 pub mod commands;
 pub use commands::Command;
@@ -25,3 +26,5 @@ use shutdown::Shutdown;
 ///
 /// Used if no port is specified.
 pub const DEFAULT_PORT: u16 = 6379;
+
+pub mod server;
