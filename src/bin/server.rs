@@ -30,7 +30,7 @@ use tracing_subscriber::{
 
 #[tokio::main]
 pub async fn main() -> Result<(), Error> {
-    set_up_logging()?;
+    set_up_logging().map_err(|e| e.to_string())?;
 
     let cli = Cli::parse();
     let port = cli.port.unwrap_or(DEFAULT_PORT);
@@ -51,7 +51,7 @@ struct Cli {
 }
 
 #[cfg(not(feature = "otel"))]
-fn set_up_logging() -> Result<(), Error> {
+fn set_up_logging() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     // See https://docs.rs/tracing for more info
     tracing_subscriber::fmt::try_init()
 }
