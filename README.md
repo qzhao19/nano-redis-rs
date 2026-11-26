@@ -1,2 +1,2 @@
-# QuarkHTTP
-Modern C++ Web Server Framework
+# nano-redis-rs
+Rust rebuild of Tokio's mini-redis
